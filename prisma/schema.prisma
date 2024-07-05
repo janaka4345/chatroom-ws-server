@@ -1,0 +1,218 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// generator erd {
+//   provider = "prisma-erd-generator"
+//   output   = "../ERD.svg"
+//   mmdcPath = "node_modules/.bin"
+// }
+
+// generator zod {
+//   provider = "zod-prisma"
+//   output   = "./zod" // (default) the directory where generated zod schemas will be saved
+
+//   relationModel = true // (default) Create and export both plain and related models.
+//   // relationModel         = "default" // Do not export model without relations.
+//   // relationModel         = false // Do not generate related model
+
+//   modelCase = "PascalCase" // (default) Output models using pascal case (ex. UserModel, PostModel)
+//   // modelCase             = "camelCase" // Output models using camel case (ex. userModel, postModel)
+
+//   modelSuffix = "Model" // (default) Suffix to apply to your prisma models when naming Zod schemas
+
+//   // useDecimalJs          = false // (default) represent the prisma Decimal type using as a JS number
+//   useDecimalJs = true // represent the prisma Decimal type using Decimal.js (as Prisma does)
+
+//   // imports = null // (default) will import the referenced file in generated schemas to be used via imports.someExportedVariable
+
+//   // https://www.prisma.io/docs/concepts/components/prisma-client/working-with-fields/working-with-json-fields#filtering-by-null-values
+//   prismaJsonNullability = true // (default) uses prisma's scheme for JSON field nullability
+//   // prismaJsonNullability = false // allows null assignment to optional JSON fields
+// }
+
+model Account {
+  id                String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String  @map("user_id") @db.ObjectId
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id") @db.ObjectId
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model User {
+  id                   String         @id @default(auto()) @map("_id") @db.ObjectId
+  name                 String?
+  socketId             String?
+  password             String?
+  status               Boolean        @default(false)
+  email                String         @unique
+  emailVerified        DateTime?      @map("email_verified")
+  image                String?
+  isTwoFactorEnabled   Boolean        @default(false)
+  // twofactorConfirmation  TODO
+  accounts             Account[]
+  sessions             Session[]
+  Friend               user_friend[]  @relation("friend")
+  User                 user_friend[]  @relation("user")
+  user_group           user_group[]
+  Request              Request[]      @relation("sender")
+  Sender               Request[]      @relation("receiver")
+  user_message_receive user_message[] @relation("messageReceiver")
+  user_message_send    user_message[] @relation("messageSender")
+
+  @@map("users")
+}
+
+enum friendStatus {
+  FRIEND
+  MUTED
+  BLOCKED
+}
+
+model user_friend {
+  id       String       @id @default(auto()) @map("_id") @db.ObjectId
+  user     User         @relation("user", fields: [userId], references: [id], onDelete: Cascade)
+  userId   String       @db.ObjectId
+  friend   User         @relation("friend", fields: [friendId], references: [id], onDelete: Cascade)
+  friendId String       @db.ObjectId
+  status   friendStatus @default(FRIEND)
+
+  @@unique([userId, friendId])
+}
+
+model Group {
+  id           String         @id @default(auto()) @map("_id") @db.ObjectId
+  group_name   String
+  user_group   user_group[]
+  Message      Message[]
+  Request      Request[]
+  user_message user_message[]
+}
+
+enum groupRole {
+  ADMIN
+  MEMBER
+}
+
+model user_group {
+  id      String    @id @default(auto()) @map("_id") @db.ObjectId
+  user    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group   Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId  String    @db.ObjectId
+  groupId String    @db.ObjectId
+  role    groupRole @default(MEMBER)
+  joined  DateTime  @default(now())
+
+  @@unique([userId, groupId])
+}
+
+model user_message {
+  id       String  @id @default(auto()) @map("_id") @db.ObjectId
+  receiver User?   @relation("messageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  sender   User    @relation("messageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  group    Group?  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  message  Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  seen     Boolean @default(false)
+
+  receiverId String? @db.ObjectId
+  messageId  String  @db.ObjectId
+  senderId   String  @db.ObjectId
+  groupId    String? @db.ObjectId
+}
+
+model Message {
+  id           String         @id @default(auto()) @map("_id") @db.ObjectId
+  message      String
+  sent         DateTime       @default(now())
+  user_message user_message[]
+  Group        Group?         @relation(fields: [groupId], references: [id])
+  groupId      String?        @db.ObjectId
+}
+
+enum requestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+model Request {
+  id         String        @id @default(auto()) @map("_id") @db.ObjectId
+  group      Group?        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sender     User          @relation("sender", fields: [senderId], references: [id])
+  receiver   User          @relation("receiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  groupId    String?       @db.ObjectId
+  receiverId String        @db.ObjectId
+  message    String?
+  sent       DateTime      @default(now())
+  status     requestStatus @default(PENDING)
+  senderId   String        @db.ObjectId
+  // @@unique([receiverId, groupId])
+
+  // @@unique([senderId, receiverId, groupId])
+}
+
+model VerificationToken {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  email   String
+  token   String   @unique
+  expires DateTime
+
+  @@unique([email, token])
+  @@map("verificationtokens")
+}
+
+model PasswordToken {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  email   String
+  token   String   @unique
+  expires DateTime
+
+  @@unique([email, token])
+  @@map("passwordtokens")
+}
+
+model twofactorToken {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  email   String
+  token   String   @unique
+  expires DateTime
+
+  @@unique([email, token])
+  @@map("twofactortokens")
+}
